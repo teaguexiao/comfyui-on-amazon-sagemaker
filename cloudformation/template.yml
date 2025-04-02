@@ -6,7 +6,7 @@ Parameters:
   AppName:
     Type: String
     Description: Application name prefix for resources provisioned
-    Default: comfyui
+    Default: comfyui-async
   DeploymentBucket:
     Type: String
     Description: Bucket name of deployment files
@@ -64,6 +64,10 @@ Parameters:
       - NONE
       - AWS_IAM
     Default: AWS_IAM
+  KmsKeyId:
+    Type: String
+    Description: KMS key ID for encryption (optional)
+    Default: ""
 
 Conditions:
   LambdaUrlAuthTypeIsNone: !Equals
@@ -72,6 +76,7 @@ Conditions:
   EnableAutoScaling: !Equals
     - !Ref SageMakerAutoScaling
     - true
+  UseKmsEncryption: !Not [!Equals [!Ref KmsKeyId, ""]]
 
 Resources:
   ComfyUIModelExecutionRole:
@@ -100,14 +105,16 @@ Resources:
     Type: "AWS::SageMaker::EndpointConfig"
     Properties:
       EndpointConfigName: !Sub "${AppName}-${ModelVersion}"
+      AsyncInferenceConfig:
+        OutputConfig:
+          S3OutputPath: !Sub "s3://${DeploymentBucket}/async-output/"
+          KmsKeyId: !If [UseKmsEncryption, !Ref KmsKeyId, !Ref AWS::NoValue]
       ProductionVariants:
         - VariantName: !Sub "${AppName}-${ModelVersion}"
           ModelName: !GetAtt ComfyUIModel.ModelName
           ContainerStartupHealthCheckTimeoutInSeconds: 600
           InitialInstanceCount: 1
           InstanceType: !Sub "${SageMakerInstanceType}"
-          RoutingConfig:
-            RoutingStrategy: LEAST_OUTSTANDING_REQUESTS
   ComfyUIEndpoint:
     Type: "AWS::SageMaker::Endpoint"
     Properties:
@@ -176,9 +183,18 @@ Resources:
             Statement:
               - Effect: Allow
                 Action:
-                  - sagemaker:InvokeEndpoint
-                Resource: !Ref ComfyUIEndpoint
-                #Resource: !Sub "arn:aws:sagemaker:${AWS::Region}:${AWS::AccountId}:endpoint/${AppName}"
+                  - sagemaker:InvokeEndpointAsync
+                  - sagemaker:DescribeEndpoint
+                  - sagemaker:DescribeEndpointConfig
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:ListBucket
+                Resource: 
+                  - !Ref ComfyUIEndpoint
+                  - !Sub "arn:aws:sagemaker:${AWS::Region}:${AWS::AccountId}:endpoint/${AppName}"
+                  - !Sub "arn:aws:sagemaker:${AWS::Region}:${AWS::AccountId}:endpoint-config/${AppName}-${ModelVersion}"
+                  - !Sub "arn:aws:s3:::${DeploymentBucket}/*"
+                  - !Sub "arn:aws:s3:::${DeploymentBucket}"
   ComfyUIFunction:
     Type: "AWS::Lambda::Function"
     Properties:
@@ -187,7 +203,7 @@ Resources:
       Role: !GetAtt ComfyUIFunctionRole.Arn
       Runtime: python3.12
       MemorySize: 256
-      Timeout : 120
+      Timeout : 600
       Architectures:
         - arm64
       Code:
@@ -196,6 +212,7 @@ Resources:
       Environment:
         Variables:
           ENDPOINT_NAME: !GetAtt ComfyUIEndpoint.EndpointName
+          DEPLOYMENT_BUCKET: !Ref DeploymentBucket
   ComfyUIFunctionUrl:
     Type: "AWS::Lambda::Url"
     Properties:
@@ -210,6 +227,11 @@ Resources:
       FunctionName: !Ref ComfyUIFunction
       FunctionUrlAuthType: "NONE"
       Principal: "*"
+  SNSTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      DisplayName: !Sub "${AppName}-inference-notifications"
+      TopicName: !Sub "${AppName}-inference-notifications"
 
 Outputs:
   ComfyUIFunctionUrl:

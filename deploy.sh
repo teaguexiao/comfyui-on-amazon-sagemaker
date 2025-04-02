@@ -17,7 +17,7 @@ lambda_hash() {
 # Set global variables for deployment, to be run after prepare_env functions
 configure() {
     # Application name prefix for resourceis provisioned (and also CloudFormation stack name)
-    APP_NAME="comfyui"
+    APP_NAME="comfyui-async"
 
     # Git reference of ComfyUI (should be a commit id instead of a branch name for production)
     COMFYUI_GIT_REF="v0.0.6"
