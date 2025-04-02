@@ -17,6 +17,18 @@ By hosting ComfyUI using Amazon SageMaker Inference, it can be particularly suit
 
 ## Architecture
 There is a Lambda function to invoke SageMaker inference endpoint (which is running ComfyUI) for generating images. For illustration, [Lambda function URL](https://docs.aws.amazon.com/lambda/latest/dg/urls-configuration.html) is configured so you can test the image generation by calling to this dedicated HTTPS endpoint.
+
+The solution uses SageMaker's asynchronous inference endpoint to handle long-running image generation tasks (over 1 minute). This is particularly useful for:
+- Complex workflows with multiple steps
+- High-resolution image generation
+- Workflows using multiple models or LoRAs
+- Batch processing of multiple images
+
+The Lambda function handles the asynchronous job lifecycle:
+1. Submits the inference job to SageMaker
+2. Polls for job completion
+3. Retrieves and returns the generated image
+
 ![Solution](./assets/solution.png)
 
 ## Deployment Guide
@@ -78,7 +90,16 @@ And here is an example of request body:
   "positive_prompt": "hill happy dog",
   "negative_prompt": "hill",
   "prompt_file": "workflow_api.json",
-  "seed": 11245
+  "seed": 11245,
+  "async": true  // Enable async inference for long-running tasks
+}
+```
+
+The response will include a job ID that can be used to track the status of the image generation:
+```json
+{
+  "job_id": "comfyui-job-1234567890",
+  "status": "IN_PROGRESS"
 }
 ```
 
